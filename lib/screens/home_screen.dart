@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../theme/colors.dart';
+import 'focus_screen.dart';
 
 /// LockedIn home — premium dashboard with quote, streak, stats, and goals.
 class HomeScreen extends StatefulWidget {
@@ -167,7 +168,11 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 28),
               FilledButton(
                 onPressed: () {
-                  // Hook for navigation / session start
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const FocusScreen(),
+                    ),
+                  );
                 },
                 style: FilledButton.styleFrom(
                   backgroundColor: _cyan,

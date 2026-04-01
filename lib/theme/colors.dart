@@ -44,8 +44,6 @@ class AppColors {
       onTertiary: textPrimaryDark,
       error: alertRedDark,
       onError: textPrimaryDark,
-      background: primaryBgDark,
-      onBackground: textPrimaryDark,
       surface: cardSurfaceDark,
       onSurface: textPrimaryDark,
       surfaceTint: cyanPrimeDark,
@@ -83,8 +81,6 @@ class AppColors {
       onTertiary: Colors.white,
       error: alertRedLight,
       onError: Colors.white,
-      background: primaryBgLight,
-      onBackground: textPrimaryLight,
       surface: cardSurfaceLight,
       onSurface: textPrimaryLight,
       surfaceTint: cyanPrimeLight,
@@ -111,4 +107,3 @@ class AppColors {
     );
   }
 }
-

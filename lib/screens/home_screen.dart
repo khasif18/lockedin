@@ -2,7 +2,14 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
+import '../models/task_model.dart';
+import '../models/user_model.dart';
+import '../services/firestore_service.dart';
+import '../screens/auth/login_screen.dart';
+import '../screens/tasks/task_create_screen.dart';
+import '../services/auth_service.dart';
 import '../theme/colors.dart';
 import 'focus_screen.dart';
 
@@ -59,10 +66,8 @@ class _HomeScreenState extends State<HomeScreen> {
   ];
 
   late int _quoteIndex;
-  final List<bool> _goalDone = [false, true, false];
 
   static const Color _cyan = Color(0xFF00D4FF);
-  static const int _streakDays = 3;
 
   @override
   void initState() {
@@ -83,6 +88,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
+  Future<void> _logout() async {
+    await AuthService().signOut();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
 
   Color get _bg =>
       _isDark ? AppColors.primaryBgDark : AppColors.primaryBgLight;
@@ -107,93 +121,156 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: _bg,
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: _cyan,
+        onPressed: () async {
+          await Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const TaskCreateScreen()),
+          );
+          // Firestore stream auto-refreshes after returning.
+        },
+        child: const Icon(Icons.add, color: Color(0xFF0A0E1A)),
+      ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _GreetingBar(
-                greeting: 'Good Morning, Khasif 👋',
-                cyan: _cyan,
-                textPrimary: _textPrimary,
-              ),
-              const SizedBox(height: 22),
-              _QuoteCard(
-                quote: quote.text,
-                author: quote.author,
-                card: _card,
-                border: _border,
-                cyan: _cyan,
-                textPrimary: _textPrimary,
-                onRefresh: _refreshQuote,
-              ),
-              const SizedBox(height: 26),
-              _StreakSection(
-                streak: _streakDays,
-                cyan: _cyan,
-                textSecondary: _textSecondary,
-              ),
-              const SizedBox(height: 22),
-              _QuickStatsRow(
-                card: _card,
-                border: _border,
-                cyan: _cyan,
-                textPrimary: _textPrimary,
-                textSecondary: _textSecondary,
-              ),
-              const SizedBox(height: 28),
-              Text(
-                "Today's Goals",
-                style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: _textPrimary,
-                  letterSpacing: -0.2,
+        child: StreamBuilder<UserModel?>(
+          stream: FirestoreService().streamUserProfile(),
+          builder: (context, userSnapshot) {
+            if (userSnapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (userSnapshot.hasError) {
+              return Center(
+                child: Text(
+                  'Error loading profile',
+                  style: GoogleFonts.poppins(color: _textPrimary),
                 ),
-              ),
-              const SizedBox(height: 14),
-              _GoalsList(
-                card: _card,
-                border: _border,
-                cyan: _cyan,
-                textPrimary: _textPrimary,
-                textSecondary: _textSecondary,
-                goalDone: _goalDone,
-                onToggle: (i) {
-                  setState(() => _goalDone[i] = !_goalDone[i]);
-                },
-              ),
-              const SizedBox(height: 28),
-              FilledButton(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const FocusScreen(),
+              );
+            }
+
+            final user = userSnapshot.data;
+            if (user == null) {
+              return Center(
+                child: Text(
+                  'User profile not found. Please log in again.',
+                  style: GoogleFonts.poppins(color: _textPrimary),
+                ),
+              );
+            }
+
+            return StreamBuilder<List<TaskModel>>(
+              stream: FirestoreService().streamUserTasks(user.uid),
+              builder: (context, taskSnapshot) {
+                final isTaskLoading = taskSnapshot.connectionState == ConnectionState.waiting;
+                if (taskSnapshot.hasError) {
+                  return Center(
+                    child: Text(
+                      'Error loading tasks',
+                      style: GoogleFonts.poppins(color: _textPrimary),
                     ),
                   );
-                },
-                style: FilledButton.styleFrom(
-                  backgroundColor: _cyan,
-                  foregroundColor: _onCyanText,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                }
+
+                final tasks = taskSnapshot.data ?? [];
+                final completedTasks = tasks.where((t) => t.isCompleted).length;
+
+                return SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _GreetingBar(
+                        greeting: 'Good Morning, ${user.name?.split(' ').first ?? 'User'} 👋',
+                        cyan: _cyan,
+                        textPrimary: _textPrimary,
+                        onLogout: _logout,
+                      ),
+                      const SizedBox(height: 22),
+                      _QuoteCard(
+                        quote: quote.text,
+                        author: quote.author,
+                        card: _card,
+                        border: _border,
+                        cyan: _cyan,
+                        textPrimary: _textPrimary,
+                        onRefresh: _refreshQuote,
+                      ),
+                      const SizedBox(height: 26),
+                      _StreakSection(
+                        streak: user.streakCount,
+                        cyan: _cyan,
+                        textSecondary: _textSecondary,
+                      ),
+                      const SizedBox(height: 22),
+                      _QuickStatsRow(
+                        card: _card,
+                        border: _border,
+                        cyan: _cyan,
+                        textPrimary: _textPrimary,
+                        textSecondary: _textSecondary,
+                        focusHours: tasks.length.toString(),
+                        tasksCompleted: completedTasks.toString(),
+                      ),
+                      const SizedBox(height: 28),
+                      Text(
+                        "Today's Goals",
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: _textPrimary,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      isTaskLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _TasksList(
+                              card: _card,
+                              border: _border,
+                              cyan: _cyan,
+                              textPrimary: _textPrimary,
+                              textSecondary: _textSecondary,
+                              tasks: tasks.where((t) => !t.isCompleted).toList(),
+                              onToggle: (task, value) {
+                                FirestoreService().toggleTaskComplete(
+                                  task.id,
+                                  value,
+                                );
+                              },
+                            ),
+                      const SizedBox(height: 28),
+                      FilledButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const FocusScreen(),
+                            ),
+                          );
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _cyan,
+                          foregroundColor: _onCyanText,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: Text(
+                          'Start Focus Session',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: _onCyanText,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                child: Text(
-                  'Start Focus Session',
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: _onCyanText,
-                  ),
-                ),
-              ),
-            ],
-          ),
+                );
+              },
+            );
+          },
         ),
       ),
     );
@@ -205,11 +282,13 @@ class _GreetingBar extends StatelessWidget {
     required this.greeting,
     required this.cyan,
     required this.textPrimary,
+    required this.onLogout,
   });
 
   final String greeting;
   final Color cyan;
   final Color textPrimary;
+  final VoidCallback onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -227,7 +306,12 @@ class _GreetingBar extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 12),
+        IconButton(
+          icon: Icon(Icons.logout, color: cyan),
+          tooltip: 'Logout',
+          onPressed: onLogout,
+        ),
+        const SizedBox(width: 4),
         Container(
           width: 46,
           height: 46,
@@ -390,6 +474,8 @@ class _QuickStatsRow extends StatelessWidget {
     required this.cyan,
     required this.textPrimary,
     required this.textSecondary,
+    required this.focusHours,
+    required this.tasksCompleted,
   });
 
   final Color card;
@@ -397,6 +483,8 @@ class _QuickStatsRow extends StatelessWidget {
   final Color cyan;
   final Color textPrimary;
   final Color textSecondary;
+  final String focusHours;
+  final String tasksCompleted;
 
   @override
   Widget build(BuildContext context) {
@@ -405,8 +493,8 @@ class _QuickStatsRow extends StatelessWidget {
         Expanded(
           child: _StatCard(
             icon: Icons.schedule_rounded,
-            value: '2.5h',
-            label: 'Focus Hours',
+            value: focusHours,
+            label: 'Total Tasks',
             card: card,
             border: border,
             cyan: cyan,
@@ -418,8 +506,8 @@ class _QuickStatsRow extends StatelessWidget {
         Expanded(
           child: _StatCard(
             icon: Icons.task_alt_rounded,
-            value: '4/6',
-            label: 'Tasks Done',
+            value: tasksCompleted,
+            label: 'Completed',
             card: card,
             border: border,
             cyan: cyan,
@@ -494,14 +582,14 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _GoalsList extends StatelessWidget {
-  const _GoalsList({
+class _TasksList extends StatelessWidget {
+  const _TasksList({
     required this.card,
     required this.border,
     required this.cyan,
     required this.textPrimary,
     required this.textSecondary,
-    required this.goalDone,
+    required this.tasks,
     required this.onToggle,
   });
 
@@ -510,17 +598,15 @@ class _GoalsList extends StatelessWidget {
   final Color cyan;
   final Color textPrimary;
   final Color textSecondary;
-  final List<bool> goalDone;
-  final void Function(int index) onToggle;
-
-  static const List<String> _titles = [
-    'Finish project proposal draft',
-    'Review notes for 25 minutes',
-    'Plan tomorrow’s top three tasks',
-  ];
+  final List<TaskModel> tasks;
+  final void Function(TaskModel task, bool newValue) onToggle;
 
   @override
   Widget build(BuildContext context) {
+    if (tasks.isEmpty) {
+      return _EmptyTasksState(card: card, border: border, cyan: cyan, textPrimary: textPrimary, textSecondary: textSecondary);
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: card,
@@ -528,57 +614,134 @@ class _GoalsList extends StatelessWidget {
         border: Border.all(color: border),
       ),
       child: Column(
-        children: List.generate(_titles.length, (i) {
-          final done = goalDone[i];
-          return Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () => onToggle(i),
-              borderRadius: BorderRadius.vertical(
-                top: i == 0 ? const Radius.circular(16) : Radius.zero,
-                bottom: i == _titles.length - 1
-                    ? const Radius.circular(16)
-                    : Radius.zero,
+        children: tasks.map((task) {
+          return _TaskTile(
+            task: task,
+            card: card,
+            border: border,
+            cyan: cyan,
+            textPrimary: textPrimary,
+            textSecondary: textSecondary,
+            onToggle: onToggle,
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _TaskTile extends StatelessWidget {
+  const _TaskTile({
+    required this.task,
+    required this.card,
+    required this.border,
+    required this.cyan,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.onToggle,
+  });
+
+  final TaskModel task;
+  final Color card;
+  final Color border;
+  final Color cyan;
+  final Color textPrimary;
+  final Color textSecondary;
+  final void Function(TaskModel task, bool newValue) onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => onToggle(task, !task.isCompleted),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Checkbox(
+                value: task.isCompleted,
+                onChanged: (value) => onToggle(task, value ?? false),
+                activeColor: cyan,
+                checkColor: AppColors.primaryBgDark,
+                side: BorderSide(color: border, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(6),
+                ),
               ),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Row(
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Checkbox(
-                        value: done,
-                        onChanged: (_) => onToggle(i),
-                        activeColor: cyan,
-                        checkColor: AppColors.primaryBgDark,
-                        side: BorderSide(color: border, width: 1.5),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        _titles[i],
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: done ? textSecondary : textPrimary,
-                          decoration: done ? TextDecoration.lineThrough : null,
-                          decorationColor: textSecondary,
-                          height: 1.35,
-                        ),
+                    Text(
+                      task.title,
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: task.isCompleted ? textSecondary : textPrimary,
+                        decoration: task.isCompleted ? TextDecoration.lineThrough : null,
                       ),
                     ),
                   ],
                 ),
               ),
-            ),
-          );
-        }),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
+
+class _EmptyTasksState extends StatelessWidget {
+  const _EmptyTasksState({
+    required this.card,
+    required this.border,
+    required this.cyan,
+    required this.textPrimary,
+    required this.textSecondary,
+  });
+
+  final Color card;
+  final Color border;
+  final Color cyan;
+  final Color textPrimary;
+  final Color textSecondary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.task_alt_rounded, color: cyan, size: 32),
+          const SizedBox(height: 8),
+          Text(
+            'No tasks yet. Tap + to add your first goal!',
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: textPrimary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Start building your daily goals and track your progress.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
